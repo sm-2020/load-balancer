@@ -81,3 +81,19 @@ func (s *ServerPool) GetNextActivePeer() *Backend {
     }
     return  nil
 }
+
+// Checks to see if a particular backend is alive by pining it
+func isBackendAlive(url *url.URL) bool {
+    timeout := 2 * time.Second
+    conn, err := net.DialTimeout("tcp",u.Host,timeout)
+    if err != nil {
+        log.Println("Site unreachable, error: ", err)
+        return false
+    }
+    _ = conn.close()
+    return true
+}
+//Pings every backend endpoints int eh slice to check their status
+func (s *ServerPool) HealthCheck() {
+
+}
