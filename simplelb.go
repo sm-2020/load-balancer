@@ -90,7 +90,7 @@ func isBackendAlive(url *url.URL) bool {
         log.Println("Site unreachable, error: ", err)
         return false
     }
-    _ = conn.close()
+    _ = conn.Close()
     return true
 }
 //Pings every backend endpoints int eh slice to check their status
@@ -106,8 +106,10 @@ func (s *ServerPool) HealthCheck() {
     }
 }
 // Get the number of attepts from the request header
+// context package allows you to store useful data in an Http request.
+// therefore heavily utilize this to track request specific data such as Attempt count and Retry count.
 func GetAttemptsfromRequest(req  *http.Request) int {
-    if attempts, ok := req.Context().value(Attempts).i(int); ok {
+    if attempts, ok := req.Context().Value(Attempts).i(int); ok {
         return attempts
     }
     return 1
@@ -115,7 +117,7 @@ func GetAttemptsfromRequest(req  *http.Request) int {
 
 //Get the number of failures from the request
 func GetRetriesfromRequest(req *http.Request) int {
-    if retry,ok := req.Context().value(Retry).(int); ok {
+    if retry,ok := req.Context().Value(Retry).(int); ok {
         return retry
     }
     return 0
@@ -135,5 +137,17 @@ func runHealthCheck() {
 
 //load balance incoming requests in a round robin manner
 func loadBalance(w http.ResponseWriter,req *http.Request) {
+    attempts := GetAttemptsfromRequest(req)
+    if attempts > 3 {
+        log.Printf("%s(%s) Max attempts reached, terminating\n", req.RemoteAddr, r.URL.Path)
+        http.Error(w, "Service not available.", http.StatusServiceUnAvailable)
+        return
+    }
+    nextService := serverPool.GetNextActivePeer ()
+    if peer != nil {
+        peer.ReverseProxy.ServerHTTP(w,req)
+        return
+    }
+    http.Error(w,"Service not available.",http.StatusServiceUnAvailable)
 
 }
