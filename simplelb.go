@@ -13,7 +13,7 @@ import (
 
 // Store information about the backend endpoints
 type Backend struct {
-    URL             *url.URL
+    Url             *url.URL
     Alive            bool
     mux             sync.RWMutex
     ReverseProxy    *httputil.ReverseProxy
@@ -56,7 +56,7 @@ func (b *Backend) isAlive() (alive bool) {
 //Mark backend status change of a a particular server
 func (s *ServerPool) MarkBackendStatus(backendURL *url.URL, alive bool) {
     for _, b := range s.backends {
-        if b.URL.String() == backendURL.String() {
+        if b.Url.String() == backendURL.String() {
             b.SetAlive(alive)
             break
         }
@@ -76,7 +76,7 @@ func (s *ServerPool) GetNextActivePeer() *Backend {
             if i != next {
                 atomic.StoreUint64(&s.current,uint64(idx))
             }
-            return sbackends[idx]
+            return backends[idx]
         }
     }
     return  nil
@@ -95,5 +95,13 @@ func isBackendAlive(url *url.URL) bool {
 }
 //Pings every backend endpoints int eh slice to check their status
 func (s *ServerPool) HealthCheck() {
-
+    for  _, b := range s.backends {
+        status := "up"
+        alive := isBackendAlive(b.url)
+        b.SetAlive(alive)
+        if !alive {
+            status := "down"
+        }
+        log.Printf("%s [%s]\n", b.URL, status)
+    }
 }
