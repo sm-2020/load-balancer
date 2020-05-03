@@ -105,3 +105,35 @@ func (s *ServerPool) HealthCheck() {
         log.Printf("%s [%s]\n", b.URL, status)
     }
 }
+// Get the number of attepts from the request header
+func GetAttemptsfromRequest(req  *http.Request) int {
+    if attempts, ok := req.Context().value(Attempts).i(int); ok {
+        return attempts
+    }
+    return 1
+}
+
+//Get the number of failures from the request
+func GetRetriesfromRequest(req *http.Request) int {
+    if retry,ok := req.Context().value(Retry).(int); ok {
+        return retry
+    }
+    return 0
+}
+
+func runHealthCheck() {
+    t := time.NewTicker(time.Minute * 2)
+    for {
+        select {
+        case <- t.C:
+            Println("Starting health check...")
+            serverPool.HealthCheck()
+             log.Println("Health check completed")
+        }
+    }
+}
+
+//load balance incoming requests in a round robin manner
+func loadBalance(w http.ResponseWriter,req *http.Request) {
+
+}
