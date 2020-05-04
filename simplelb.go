@@ -9,6 +9,14 @@ import (
     "flag"
     "fmt"
     "sync"
+    "sync/atomic"
+    "log"
+    "strings"
+    "time"
+    "net"
+    "net/http"
+    "net/http/httputil"
+    "net/url"
 )
 
 // Store information about the backend endpoints
@@ -37,7 +45,7 @@ func (s *ServerPool) AddBackend(backend *Backend) {
 }
 //Increase the counter and returns the next available index in the ServerPool slice
 func (s *ServerPool) NextIndex() int {
-    return int(atomic.addUint64(&s.current,uint64(1)) % uint64(len(s.backends)))
+    return int(atomic.AddUint64(&s.current,uint64(1)) % uint64(len(s.backends)))
 }
 
 //Set whether this backend endpoint is alive or not
@@ -47,10 +55,10 @@ func (b  *Backend) SetAlive(isAlive bool) {
     b.mux.Unlock()
 }
 //ISAlive returns true when any backend is alive
-func (b *Backend) isAlive() (alive bool) {
+func (b *Backend) IsAlive() (alive bool) {
     b.mux.RLock()
     alive = b.Alive
-    n.mux.RUnlock()
+    b.mux.RUnlock()
     return
 }
 //Mark backend status change of a a particular server
@@ -69,7 +77,7 @@ func (s *ServerPool) GetNextActivePeer() *Backend {
 
     next := s.NextIndex()
     //start from the next and move a full cycle
-    l = len(s.backends) + next
+    l := len(s.backends) + next
     for i := next; i < l; i++ {
         idx := i % len(s.backends) // use modding to keep index within range
         if s.backends[idx].IsAlive() {
@@ -150,4 +158,39 @@ func loadBalance(w http.ResponseWriter,req *http.Request) {
     }
     http.Error(w,"Service not available.",http.StatusServiceUnAvailable)
 
+}
+var serverpool *ServerPool
+
+func init() {
+    //parse args and create ServerPool
+    var serverList string
+    var port int
+    flag.StringVar(serverList,"backends","", "Load balanced backends, use commas to separate")
+    flag.IntVar(&port,"port",3030,"Port to server")
+    flag.Parse()
+
+    if len(serverList) == 0 {
+        log.Fatal("Please provide one or more server backends to load balance")
+    }
+    //Now parse the backends
+    tokens := strings.Split(server-list,",")
+
+    for _,tok := range tokens {
+        serverUrl, err := url.Parse(tok)
+        if err != nil {
+            log.Fatal(err)
+        }
+        proxy := httputil.NewSingleHostReverseProxy(serverUrl)
+        proxy.ErrorHandler = func(w http.Responsewriter, req *http.Request, e error) {
+           log.Printf("[%s] %s\n", serverUrl.Host, e.Error())
+           retries := GetRetriesfromRequest(req)
+           if retries < 3 {
+               select {
+               case <- time.After(10 * time.Millisecond):
+                //increment retries and add it to context
+                ctx := context.WithValue(req.Context(),Retry, retries+1)
+                proxy.ServeHTTP(w, req.WithContext(ctx))}
+           }
+        }
+    }
 }
