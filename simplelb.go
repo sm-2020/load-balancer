@@ -175,7 +175,7 @@ func init() {
     //Now parse the backends
     tokens := strings.Split(server-list,",")
 
-    for _,tok := range tokens {
+    for _, tok := range tokens {
         serverUrl, err := url.Parse(tok)
         if err != nil {
             log.Fatal(err)
@@ -189,8 +189,34 @@ func init() {
                case <- time.After(10 * time.Millisecond):
                 //increment retries and add it to context
                 ctx := context.WithValue(req.Context(),Retry, retries+1)
-                proxy.ServeHTTP(w, req.WithContext(ctx))}
+                proxy.ServeHTTP(w, req.WithContext(ctx))
+              }
+              return
            }
+           //Consider the endpoint to be down after 3 retries
+          serverpool.MarkBackendStatus(serverUrl,false)
+          attempts :=  GetAttemptsfromRequest(req)
+          log.Printf("%s(%s) Attempting another retry. %d\n", req.RemoteAddr, req.URL.Path,attempts)
+          ctx := context.WithValue(req.Context(),Attempts,attempts+1)
+          loadBalance(w,req.WithContext(ctx))
         }
+               serverPool.AddBackend(&Backend {
+                   URL: serverUrl,
+                   Alive: true,
+                   ReverseProxy: proxy,
+                })
+                log.Printf("Configured endpoint: %s\n", serverUrl)
+    }
+    //create http server
+    server := http.Server {
+       Addr:   fmt.Sprintf(":%d, port")
+       Handler: http.HandleFunc(loadBalance),
+    }
+    go HealthCheck()
+
+    //Print start message
+    log.Printf("Simple load balancer started at :%d\n", port)
+    if err := server.LostenAndServe(); err != nil {
+        log(Fatal(err))
     }
 }
