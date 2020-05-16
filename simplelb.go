@@ -84,7 +84,7 @@ func (s *ServerPool) GetNextActivePeer() *Backend {
             if i != next {
                 atomic.StoreUint64(&s.current,uint64(idx))
             }
-            return backends[idx]
+            return s.backends[idx]
         }
     }
     return  nil
@@ -93,7 +93,7 @@ func (s *ServerPool) GetNextActivePeer() *Backend {
 // Checks to see if a particular backend is alive by pining it
 func isBackendAlive(url *url.URL) bool {
     timeout := 2 * time.Second
-    conn, err := net.DialTimeout("tcp",u.Host,timeout)
+    conn, err := net.DialTimeout("tcp",url.Host,timeout)
     if err != nil {
         log.Println("Site unreachable, error: ", err)
         return false
@@ -105,19 +105,19 @@ func isBackendAlive(url *url.URL) bool {
 func (s *ServerPool) HealthCheck() {
     for  _, b := range s.backends {
         status := "up"
-        alive := isBackendAlive(b.url)
+        alive := isBackendAlive(b.Url)
         b.SetAlive(alive)
         if !alive {
-            status := "down"
+            status = "down"
         }
-        log.Printf("%s [%s]\n", b.URL, status)
+        log.Printf("%s [%s]\n", b.Url, status)
     }
 }
 // Get the number of attepts from the request header
 // context package allows you to store useful data in an Http request.
 // therefore heavily utilize this to track request specific data such as Attempt count and Retry count.
 func GetAttemptsfromRequest(req  *http.Request) int {
-    if attempts, ok := req.Context().Value(Attempts).i(int); ok {
+    if attempts, ok := req.Context().Value(Attempts).(int); ok {
         return attempts
     }
     return 1
@@ -135,10 +135,11 @@ func runHealthCheck() {
     t := time.NewTicker(time.Minute * 2)
     for {
         select {
-        case <- t.C:
-            Println("Starting health check...")
-            serverPool.HealthCheck()
-             log.Println("Health check completed")
+
+         case <- t.C:
+            log.Println("Starting health check...")
+            serverpool.HealthCheck()
+            log.Println("Health check completed")
         }
     }
 }
@@ -147,25 +148,25 @@ func runHealthCheck() {
 func loadBalance(w http.ResponseWriter,req *http.Request) {
     attempts := GetAttemptsfromRequest(req)
     if attempts > 3 {
-        log.Printf("%s(%s) Max attempts reached, terminating\n", req.RemoteAddr, r.URL.Path)
-        http.Error(w, "Service not available.", http.StatusServiceUnAvailable)
+        log.Printf("%s(%s) Max attempts reached, terminating\n", req.RemoteAddr, req.URL.Path)
+        http.Error(w, "Service not available.", http.StatusServiceUnavailable)
         return
     }
-    nextService := serverPool.GetNextActivePeer ()
-    if peer != nil {
-        peer.ReverseProxy.ServerHTTP(w,req)
+    nextService := serverpool.GetNextActivePeer ()
+    if nextService  != nil {
+        nextService.ReverseProxy.ServeHTTP(w,req)
         return
     }
-    http.Error(w,"Service not available.",http.StatusServiceUnAvailable)
+    http.Error(w,"Service not available.",http.StatusServiceUnavailable)
 
 }
 var serverpool *ServerPool
 
-func init() {
+func main() {
     //parse args and create ServerPool
     var serverList string
     var port int
-    flag.StringVar(serverList,"backends","", "Load balanced backends, use commas to separate")
+    flag.StringVar(&serverList,"backends","", "Load balanced backends, use commas to separate")
     flag.IntVar(&port,"port",3030,"Port to server")
     flag.Parse()
 
@@ -173,7 +174,7 @@ func init() {
         log.Fatal("Please provide one or more server backends to load balance")
     }
     //Now parse the backends
-    tokens := strings.Split(server-list,",")
+    tokens := strings.Split(serverList,",")
 
     for _, tok := range tokens {
         serverUrl, err := url.Parse(tok)
@@ -181,7 +182,7 @@ func init() {
             log.Fatal(err)
         }
         proxy := httputil.NewSingleHostReverseProxy(serverUrl)
-        proxy.ErrorHandler = func(w http.Responsewriter, req *http.Request, e error) {
+        proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, e error) {
            log.Printf("[%s] %s\n", serverUrl.Host, e.Error())
            retries := GetRetriesfromRequest(req)
            if retries < 3 {
@@ -200,8 +201,8 @@ func init() {
           ctx := context.WithValue(req.Context(),Attempts,attempts+1)
           loadBalance(w,req.WithContext(ctx))
         }
-               serverPool.AddBackend(&Backend {
-                   URL: serverUrl,
+               serverpool.AddBackend(&Backend {
+                   Url: serverUrl,
                    Alive: true,
                    ReverseProxy: proxy,
                 })
@@ -209,14 +210,14 @@ func init() {
     }
     //create http server
     server := http.Server {
-       Addr:   fmt.Sprintf(":%d, port")
-       Handler: http.HandleFunc(loadBalance),
+       Addr:   fmt.Sprintf(":%d", port),
+       Handler: http.HandlerFunc(loadBalance),
     }
-    go HealthCheck()
+    go runHealthCheck()
 
     //Print start message
     log.Printf("Simple load balancer started at :%d\n", port)
-    if err := server.LostenAndServe(); err != nil {
-        log(Fatal(err))
+    if err := server.ListenAndServe(); err != nil {
+        log.Fatal(err)
     }
 }
