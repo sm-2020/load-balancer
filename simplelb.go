@@ -160,7 +160,7 @@ func loadBalance(w http.ResponseWriter,req *http.Request) {
     http.Error(w,"Service not available.",http.StatusServiceUnavailable)
 
 }
-var serverpool *ServerPool
+var serverpool ServerPool
 
 func main() {
     //parse args and create ServerPool
